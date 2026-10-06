@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'">
+  <title>MC 自动玩家 · 多假人 + AI</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <div class="title-wrap">
+      <span class="logo">⛏</span>
+      <h1>MC 自动玩家</h1>
+      <span class="sub">Mineflayer + AI · 多假人 · 1.21.11</span>
+    </div>
+    <div class="conn-state">
+      <span id="state-dot" class="dot off"></span>
+      <span id="state-text">未连接</span>
+    </div>
+  </header>
+
+  <main>
+    <!-- 批量添加 -->
+    <section class="panel">
+      <h2>批量添加假人</h2>
+      <div class="grid">
+        <label>服务器地址 <input id="host" type="text" value="127.0.0.1"></label>
+        <label>端口 <input id="port" type="number" value="25565" min="1" max="65535"></label>
+        <label>游戏版本
+          <select id="version">
+            <option value="1.21.11" selected>1.21.11</option>
+            <option value="1.21.10">1.21.10</option>
+            <option value="1.21.9">1.21.9</option>
+            <option value="1.21.8">1.21.8</option>
+          </select>
+        </label>
+        <label>登录方式
+          <select id="auth">
+            <option value="offline" selected>离线模式</option>
+            <option value="microsoft">正版微软账号</option>
+          </select>
+        </label>
+        <label>名字前缀 <input id="namePrefix" type="text" value="Bot"></label>
+        <label>起始编号 <input id="startIndex" type="number" value="1" min="1"></label>
+        <label>数量 <input id="count" type="number" value="3" min="1" max="20"></label>
+        <label>新建假人的 AI
+          <select id="newAiMode">
+            <option value="off" selected>关闭</option>
+            <option value="passive">被动响应</option>
+            <option value="autonomous">自主游玩</option>
+          </select>
+        </label>
+      </div>
+      <div class="row">
+        <button id="btn-batch" class="btn">＋ 只添加不上线</button>
+        <button id="btn-batch-start" class="btn primary">＋ 批量添加并上线</button>
+        <button id="btn-start-all" class="btn primary">▶ 一键全部上线</button>
+        <button id="btn-stop-all" class="btn danger">■ 全部下线</button>
+        <button id="btn-clear" class="btn danger">🗑 清空列表</button>
+      </div>
+      <p class="hint">例：前缀 Bot + 起始 1 + 数量 3 → Bot1、Bot2、Bot3。名字不能重复，否则后上线的会把前面的顶下线。</p>
+    </section>
+
+    <!-- AI 设置 -->
+    <section class="panel">
+      <h2>AI 设置</h2>
+      <div class="grid">
+        <label>接入方式
+          <select id="ai-provider">
+            <option value="openai" selected>OpenAI 兼容接口（DeepSeek 等）</option>
+            <option value="ollama">本地 Ollama</option>
+          </select>
+        </label>
+        <label>接口地址 <input id="ai-baseUrl" type="text" placeholder="https://api.deepseek.com/v1"></label>
+        <label>API Key <input id="ai-apiKey" type="password" placeholder="sk-..."></label>
+        <label>模型名 <input id="ai-model" type="text" placeholder="deepseek-chat"></label>
+        <label>被动触发条件
+          <select id="ai-trigger">
+            <option value="name" selected>只有叫它名字才回应</option>
+            <option value="all">所有聊天都回应</option>
+          </select>
+        </label>
+        <label>自主决策间隔（秒）<input id="ai-interval" type="number" value="20" min="5" max="300"></label>
+      </div>
+      <div class="row">
+        <button id="btn-ai-save" class="btn primary">保存 AI 设置</button>
+        <button id="btn-ai-test" class="btn">测试连接</button>
+        <span id="ai-status" class="ai-status"></span>
+      </div>
+      <p class="hint">AI 能看到假人的实时状态（坐标/血量/背包/附近玩家与怪物），并且只能通过白名单动作操作假人：走动、跟随、收集、挖掘、攻击、巡逻、说话、查状态。</p>
+    </section>
+
+    <!-- 假人列表 -->
+    <section class="panel">
+      <h2>假人列表 <span id="bot-count" class="badge">0</span></h2>
+      <div id="bot-list" class="bot-list"><p class="empty">还没有假人，上面添加一个吧</p></div>
+    </section>
+
+    <!-- 手动操作 -->
+    <section class="panel">
+      <h2>手动操作</h2>
+      <div class="actions">
+        <div class="action-row">
+          <span class="lbl">目标假人</span>
+          <select id="target-bot" class="wide"></select>
+        </div>
+        <div class="action-row">
+          <input id="chat-input" type="text" placeholder="以该假人身份发言..." disabled>
+          <button id="btn-chat" class="btn" disabled>发言</button>
+        </div>
+        <div class="action-row">
+          <span class="lbl">走到坐标</span>
+          <input id="walk-x" type="number" placeholder="X" value="0">
+          <input id="walk-y" type="number" placeholder="Y" value="4">
+          <input id="walk-z" type="number" placeholder="Z" value="0">
+          <button id="btn-walk" class="btn" disabled>前往</button>
+        </div>
+        <div class="action-row">
+          <span class="lbl">跟随玩家</span>
+          <input id="follow-name" type="text" placeholder="玩家名字" disabled>
+          <button id="btn-follow" class="btn" disabled>跟随</button>
+          <button id="btn-stopmove" class="btn" disabled>停止移动</button>
+        </div>
+        <div class="action-row">
+          <span class="lbl">收集方块</span>
+          <input id="collect-name" type="text" placeholder="英文ID，如 oak_log" disabled>
+          <input id="collect-count" type="number" placeholder="数量" value="1" min="1" max="100">
+          <button id="btn-collect" class="btn" disabled>开始收集</button>
+        </div>
+        <div class="action-row">
+          <span class="lbl">挖掉方块</span>
+          <input id="dig-x" type="number" placeholder="X" value="0">
+          <input id="dig-y" type="number" placeholder="Y" value="3">
+          <input id="dig-z" type="number" placeholder="Z" value="0">
+          <button id="btn-dig" class="btn" disabled>挖掘</button>
+          <button id="btn-attack" class="btn" disabled>攻击附近怪物</button>
+        </div>
+        <div class="toggles">
+          <label class="toggle"><input id="tg-eat" type="checkbox" disabled><span>自动吃东西</span></label>
+          <label class="toggle"><input id="tg-armor" type="checkbox" disabled><span>自动穿护甲</span></label>
+          <label class="toggle"><input id="tg-wander" type="checkbox" disabled><span>自动巡逻</span></label>
+        </div>
+      </div>
+      <p class="hint">游戏内也可以直接指挥：对假人发「来 / 停 / 去 X Y Z / 挖 oak_log 10 / 给 diamond 3 / 状态」；开了 AI 的话，叫它名字跟它说话即可。</p>
+    </section>
+
+    <!-- 日志 -->
+    <section class="panel log-panel">
+      <h2>运行日志</h2>
+      <div id="log" class="log"></div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

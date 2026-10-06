@@ -1,0 +1,16 @@
+# 依赖与构建产物（体积大，不进仓库）
+node_modules/
+dist/
+out/
+build-cache/
+
+# 运行期生成的文件，可能含隐私信息（微软登录缓存、AI 的 API Key、日志）
+msa-cache.json
+mc-auto-player-settings.json
+*.log
+
+# 编辑器 / 系统
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
