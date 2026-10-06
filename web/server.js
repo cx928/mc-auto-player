@@ -43,6 +43,7 @@ manager.on('log', (e) => broadcast('log', e))
 manager.on('bots', (list) => broadcast('bots', list))
 manager.on('msa-code', (e) => broadcast('msa-code', e))
 manager.on('ai', (s) => broadcast('ai', s))
+manager.on('presets', (list) => broadcast('presets', list))
 
 // ---------- 静态文件 ----------
 const MIME = {
@@ -76,6 +77,10 @@ const actions = {
   stopAll: () => { manager.stopAll(); return { ok: true } },
   setAiMode: (b) => ({ ok: manager.setAiMode(b.id, b.mode) }),
   saveAi: (b) => ({ ai: manager.updateAiSettings(b || {}) }),
+  savePreset: (b) => ({ preset: manager.savePreset(b || {}) }),
+  removePreset: (b) => ({ ok: manager.removePreset(String(b.name || '')) }),
+  quickStart: (b) => ({ ids: manager.quickStart(b || {}) }),
+  microsoftStatus: () => ({ status: manager.microsoftStatus() }),
   action: (b) => ({ ok: manager.action(b.id, b.name, b.args || {}) })
 }
 
@@ -108,7 +113,15 @@ const server = http.createServer(async (req, res) => {
 
   if (p === '/api/state') {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
-    return res.end(JSON.stringify({ ai: manager.ai, bots: manager.getBots(), autoStart: manager.autoStart }))
+    return res.end(JSON.stringify({
+      ai: manager.ai,
+      bots: manager.getBots(),
+      presets: manager.presets,
+      lastUsed: manager.lastUsed,
+      autoStart: manager.autoStart,
+      versions: manager.versionsInfo(),
+      microsoft: manager.microsoftStatus()
+    }))
   }
 
   if (p === '/api/testAi') {

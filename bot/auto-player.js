@@ -12,6 +12,7 @@ const collectPlugin = require('mineflayer-collectblock').plugin
 const { Vec3 } = require('vec3')
 const mcDataByVersion = require('minecraft-data')
 const { splitHostPort, explainError } = require('./util')
+const { resolveVersion, checkSupport, NEWEST_TESTED } = require('./versions')
 
 // 护甲材料等级（内置自动穿甲用）
 const ARMOR_TIERS = { leather: 1, golden: 2, chainmail: 3, iron: 4, diamond: 5, netherite: 6 }
@@ -52,12 +53,14 @@ class AutoPlayer extends EventEmitter {
     const auth = cfg.auth === 'microsoft' ? 'microsoft' : 'offline'
     // 容错：允许把端口直接写在地址里（"1.2.3.4:43042"），避免被当成域名去做 DNS 解析
     const { host, port } = splitHostPort(cfg.host, cfg.port)
+    // 版本：'auto'（默认）时传 false，mineflayer 会自己 ping 服务器识别版本
+    const wantVersion = resolveVersion(cfg.version)
     const opts = {
       host,
       port,
       // 多假人场景下管理器传的是 cfg.name；两个都接受，避免多个假人同名互相顶下线
       username: cfg.username || cfg.name || 'AutoPlayer',
-      version: cfg.version || '1.21.11',
+      version: wantVersion,
       auth,
       viewDistance: 'short',
       checkTimeoutInterval: 30 * 1000,
@@ -68,9 +71,14 @@ class AutoPlayer extends EventEmitter {
         this.log('info', `微软登录码已生成，请打开 https://microsoft.com/link 输入: ${code.user_code}`)
       }
     }
-    if (auth === 'microsoft') opts.authCache = 'msa-cache.json'
+    if (auth === 'microsoft') opts.authCache = cfg.authCache || 'msa-cache.json'
 
-    this.log('info', `正在连接 ${opts.host}:${opts.port}（版本 ${opts.version}，认证 ${auth}）...`)
+    this.versionMode = wantVersion === false ? '自动探测' : wantVersion
+    // 记住本次参数，便于"版本超范围时自动回退重试"
+    if (!cfg._fromRetry) this._retried = false
+    this._lastCfg = { ...cfg }
+    this._lastError = null
+    this.log('info', `正在连接 ${opts.host}:${opts.port}（版本 ${this.versionMode}，认证 ${auth}）...`)
     this.bot = mineflayer.createBot(opts)
     this._connectHost = opts.host
     this._rawHost = String(cfg.host == null ? '' : cfg.host) // 保留用户原始输入，便于给出准确提示
@@ -89,7 +97,12 @@ class AutoPlayer extends EventEmitter {
 
     bot.on('login', () => {
       this.running = true
+      this.detectedVersion = bot.version
+      this.protocolVersion = bot.protocolVersion
       this.log('info', `登录成功，游戏名: ${bot.username}`)
+      const sup = checkSupport(bot.version)
+      this.log(sup.ok ? (sup.level === 'tested' ? 'info' : 'warn') : 'error',
+        `服务器版本: ${sup.message}（协议 ${bot.protocolVersion}${this.versionMode === '自动探测' ? '，自动探测' : ''}）`)
       this.emit('status', this.getStatus())
     })
 
@@ -108,9 +121,20 @@ class AutoPlayer extends EventEmitter {
     })
     bot.on('end', (reason) => {
       this.log('info', `连接结束: ${reason}`)
+      // 自动探测到超范围版本时，退一步用最新支持版本再试一次（配合服务端 ViaVersion 可进新版服务器）
+      const err = this._lastError
+      const unsupported = !!(err && /no data available for version|is not supported/i.test(String(err.message || '')))
+      const canRetry = unsupported && this.versionMode === '自动探测' && !this._retried && this._lastCfg
       this._cleanup()
+      if (canRetry) {
+        this._retried = true
+        this.log('warn', `服务器版本超出了上游支持范围（当前最新支持 ${NEWEST_TESTED}），自动改用 ${NEWEST_TESTED} 再试一次...`)
+        this.log('info', '若服务器装了 ViaVersion + ViaBackwards，这样就可以正常进入；否则请把服务端版本调整到支持范围内')
+        this.start({ ...this._lastCfg, version: NEWEST_TESTED, _fromRetry: true })
+      }
     })
     bot.on('error', (err) => {
+      this._lastError = err
       if (!this.running) this.log('error', explainError(err, this._rawHost))
     })
 
@@ -158,7 +182,14 @@ class AutoPlayer extends EventEmitter {
   }
 
   getStatus () {
-    if (!this.bot) return { connected: false }
+    if (!this.bot) {
+      return {
+        connected: false,
+        version: this.detectedVersion || null,
+        protocolVersion: this.protocolVersion || null,
+        versionMode: this.versionMode || null
+      }
+    }
     const b = this.bot
     // 注意：机器人刚创建时 players/food/health 等字段还没有下发，这里必须全部做保护，
     // 否则 Object.keys(undefined) 之类的异常会让整个进程崩溃（Electron 主进程同样受影响）
@@ -175,6 +206,9 @@ class AutoPlayer extends EventEmitter {
       } : null,
       dimension: b.game ? b.game.dimension : null,
       players: b.players ? Object.keys(b.players).length : 0,
+      version: this.detectedVersion || null,
+      protocolVersion: this.protocolVersion || null,
+      versionMode: this.versionMode || null,
       autoEat: this.autoEatOn,
       autoArmor: this.autoArmorOn,
       wander: this.wanderOn

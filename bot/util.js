@@ -47,8 +47,8 @@ function explainError (err, rawHost) {
   if (code === 'ETIMEDOUT' || /ETIMEDOUT/.test(msg)) {
     return `连接失败：${msg}（连接超时：检查防火墙/云服务器安全组是否放行了这个端口）`
   }
-  if (/version|protocol/i.test(msg) && /unsupported/i.test(msg)) {
-    return `连接失败：${msg}（版本不匹配：把 --version 改成与服务器一致的版本）`
+  if (/not supported|unsupported/i.test(msg) && /version|protocol/i.test(msg)) {
+    return `连接失败：${msg}（版本超出支持范围：请在界面/参数里手动指定一个更接近的版本，或升级本程序）`
   }
   return `连接失败：${msg}`
 }

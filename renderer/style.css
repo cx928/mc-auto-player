@@ -171,3 +171,7 @@ select.wide { width: 260px; }
 .ai-status.ok { color: var(--accent); }
 .ai-status.bad { color: var(--danger); }
 
+/* ---------- 一键挂机 ---------- */
+.btn.big { padding: 10px 24px; font-size: 15px; font-weight: bold; }
+input.short { width: 170px; }
+

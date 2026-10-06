@@ -20,19 +20,17 @@
   </header>
 
   <main>
-    <!-- 批量添加 -->
+    <!-- 一键挂机 -->
     <section class="panel">
-      <h2>批量添加假人</h2>
+      <h2>⚡ 一键挂机</h2>
       <div class="grid">
+        <label>服务器预设
+          <select id="preset"><option value="">（无预设，请先保存）</option></select>
+        </label>
         <label>服务器地址 <input id="host" type="text" value="127.0.0.1"></label>
         <label>端口 <input id="port" type="number" value="25565" min="1" max="65535"></label>
         <label>游戏版本
-          <select id="version">
-            <option value="1.21.11" selected>1.21.11</option>
-            <option value="1.21.10">1.21.10</option>
-            <option value="1.21.9">1.21.9</option>
-            <option value="1.21.8">1.21.8</option>
-          </select>
+          <select id="version"></select>
         </label>
         <label>登录方式
           <select id="auth">
@@ -41,7 +39,6 @@
           </select>
         </label>
         <label>名字前缀 <input id="namePrefix" type="text" value="Bot"></label>
-        <label>起始编号 <input id="startIndex" type="number" value="1" min="1"></label>
         <label>数量 <input id="count" type="number" value="3" min="1" max="20"></label>
         <label>新建假人的 AI
           <select id="newAiMode">
@@ -52,13 +49,24 @@
         </label>
       </div>
       <div class="row">
+        <button id="btn-quick" class="btn primary big">⚡ 一键上线</button>
         <button id="btn-batch" class="btn">＋ 只添加不上线</button>
-        <button id="btn-batch-start" class="btn primary">＋ 批量添加并上线</button>
-        <button id="btn-start-all" class="btn primary">▶ 一键全部上线</button>
+        <button id="btn-start-all" class="btn primary">▶ 全部上线</button>
         <button id="btn-stop-all" class="btn danger">■ 全部下线</button>
         <button id="btn-clear" class="btn danger">🗑 清空列表</button>
       </div>
-      <p class="hint">例：前缀 Bot + 起始 1 + 数量 3 → Bot1、Bot2、Bot3。名字不能重复，否则后上线的会把前面的顶下线。</p>
+      <div class="row">
+        <input id="presetName" type="text" placeholder="预设名字，如 我的服务器" class="short">
+        <button id="btn-preset-save" class="btn">💾 保存为预设</button>
+        <button id="btn-preset-load" class="btn">📂 载入选中预设</button>
+        <button id="btn-preset-del" class="btn danger">删除选中预设</button>
+        <span id="msa-status" class="ai-status"></span>
+      </div>
+      <p class="hint">
+        版本选「自动探测」即可 —— 程序会自己 ping 服务器识别版本，<b>1.12 ~ 26.3 都不用你手填</b>。
+        名字会自动去重（前缀 + 序号），不会再出现两个假人同名互相顶下线。
+      </p>
+      <p class="hint" id="version-hint"></p>
     </section>
 
     <!-- AI 设置 -->

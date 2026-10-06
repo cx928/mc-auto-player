@@ -43,9 +43,21 @@ function createWindow () {
 }
 
 function registerIpc () {
-  ipcMain.handle('state', () => ({ ai: manager.ai, bots: manager.getBots(), autoStart: manager.autoStart }))
+  ipcMain.handle('state', () => ({
+    ai: manager.ai,
+    bots: manager.getBots(),
+    presets: manager.presets,
+    lastUsed: manager.lastUsed,
+    autoStart: manager.autoStart,
+    versions: manager.versionsInfo(),
+    microsoft: manager.microsoftStatus()
+  }))
   ipcMain.handle('addBot', (_e, cfg) => ({ id: manager.addBot(cfg || {}) }))
   ipcMain.handle('batchAdd', (_e, cfg) => ({ ids: manager.batchAdd(cfg || {}) }))
+  ipcMain.handle('quickStart', (_e, cfg) => ({ ids: manager.quickStart(cfg || {}) }))
+  ipcMain.handle('savePreset', (_e, p) => ({ preset: manager.savePreset(p || {}) }))
+  ipcMain.handle('removePreset', (_e, name) => ({ ok: manager.removePreset(String(name || '')) }))
+  ipcMain.handle('microsoftStatus', () => ({ status: manager.microsoftStatus() }))
   ipcMain.handle('removeBot', (_e, id) => ({ ok: manager.removeBot(id) }))
   ipcMain.handle('clearBots', () => { manager.clear(); return { ok: true } })
   ipcMain.handle('startBot', (_e, id) => ({ ok: manager.startBot(id) }))
@@ -75,6 +87,7 @@ app.whenReady().then(() => {
   manager.on('bots', (list) => send('bots', list))
   manager.on('msa-code', (e) => send('msa-code', e))
   manager.on('ai', (s) => send('ai', s))
+  manager.on('presets', (list) => send('presets', list))
 
   registerIpc()
   createWindow()

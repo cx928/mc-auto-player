@@ -25,6 +25,10 @@ function createWebApi () {
     getState: () => fetch('/api/state').then((r) => r.json()).catch(() => ({ bots: [], ai: {} })),
     addBot: (cfg) => post('addBot', cfg),
     batchAdd: (cfg) => post('batchAdd', cfg),
+    quickStart: (cfg) => post('quickStart', cfg),
+    savePreset: (p) => post('savePreset', p),
+    removePreset: (name) => post('removePreset', { name }),
+    microsoftStatus: () => fetch('/api/state').then((r) => r.json()).then((s) => ({ status: s.microsoft })).catch(() => ({})),
     removeBot: (id) => post('removeBot', { id }),
     clearBots: () => post('clearBots', {}),
     startBot: (id) => post('startBot', { id }),
@@ -38,7 +42,8 @@ function createWebApi () {
     onLog: on('log'),
     onBots: on('bots'),
     onMsaCode: on('msa-code'),
-    onAi: on('ai')
+    onAi: on('ai'),
+    onPresets: on('presets')
   }
 }
 
@@ -46,8 +51,11 @@ const api = window.api || createWebApi()
 
 const els = {
   host: $('host'), port: $('port'), version: $('version'), auth: $('auth'),
-  namePrefix: $('namePrefix'), startIndex: $('startIndex'), count: $('count'), newAiMode: $('newAiMode'),
-  btnBatch: $('btn-batch'), btnBatchStart: $('btn-batch-start'),
+  namePrefix: $('namePrefix'), count: $('count'), newAiMode: $('newAiMode'),
+  preset: $('preset'), presetName: $('presetName'),
+  btnQuick: $('btn-quick'), btnBatch: $('btn-batch'),
+  btnPresetSave: $('btn-preset-save'), btnPresetLoad: $('btn-preset-load'), btnPresetDel: $('btn-preset-del'),
+  msaStatus: $('msa-status'), versionHint: $('version-hint'),
   btnStartAll: $('btn-start-all'), btnStopAll: $('btn-stop-all'), btnClear: $('btn-clear'),
   aiProvider: $('ai-provider'), aiBaseUrl: $('ai-baseUrl'), aiApiKey: $('ai-apiKey'), aiModel: $('ai-model'),
   aiTrigger: $('ai-trigger'), aiInterval: $('ai-interval'),
@@ -66,6 +74,8 @@ const els = {
 
 let bots = []
 let ai = {}
+let presets = []
+let versions = null
 let targetId = null
 let suppressToggle = false // 状态刷新时避免把 checkbox 的 change 当成用户操作
 
@@ -99,7 +109,12 @@ function botRow (b) {
 
   const addr = document.createElement('span')
   addr.className = 'bot-addr'
-  addr.textContent = `${b.host}:${b.port} · ${b.version}`
+  // 自动探测时显示实际连上的服务器版本
+  const verText = b.detectedVersion
+    ? `${b.detectedVersion}${b.version === 'auto' ? '(自动)' : ''}`
+    : (b.version === 'auto' ? '自动探测' : b.version)
+  addr.textContent = `${b.host}:${b.port} · ${verText}`
+  if (b.detectedVersion && b.protocolVersion) addr.title = `协议 ${b.protocolVersion}`
   row.appendChild(addr)
 
   const stats = document.createElement('span')
@@ -230,20 +245,125 @@ function batchCfg () {
   return {
     host: els.host.value.trim(),
     port: Number(els.port.value) || 25565,
-    version: els.version.value,
+    version: els.version.value || 'auto',
     auth: els.auth.value,
     namePrefix: els.namePrefix.value.trim() || 'Bot',
-    startIndex: Number(els.startIndex.value) || 1,
     count: Number(els.count.value) || 1,
     aiMode: els.newAiMode.value
   }
 }
 
+// ---------- 版本清单（自动探测 + 全部版本） ----------
+function renderVersions (v) {
+  versions = v || null
+  if (!versions || !versions.all) return
+  const sel = els.version
+  sel.textContent = ''
+
+  const gAuto = document.createElement('optgroup')
+  gAuto.label = '推荐'
+  const oAuto = document.createElement('option')
+  oAuto.value = 'auto'
+  oAuto.textContent = '自动探测（推荐，不用手填版本）'
+  gAuto.appendChild(oAuto)
+  sel.appendChild(gAuto)
+
+  const gT = document.createElement('optgroup')
+  gT.label = '官方测试过的版本'
+  for (const name of versions.recommended || []) {
+    const o = document.createElement('option')
+    o.value = name
+    o.textContent = name
+    gT.appendChild(o)
+  }
+  sel.appendChild(gT)
+
+  const other = (versions.all || []).filter((x) => !x.tested)
+  if (other.length) {
+    const gO = document.createElement('optgroup')
+    gO.label = `其它版本（${other.length} 个，官方未测试）`
+    for (const x of other) {
+      const o = document.createElement('option')
+      o.value = x.version
+      o.textContent = x.version
+      gO.appendChild(o)
+    }
+    sel.appendChild(gO)
+  }
+  sel.value = 'auto'
+  if (els.versionHint) {
+    els.versionHint.textContent = `已收录 ${versions.all.length} 个正式版，覆盖 1.12 ~ 26.3。${versions.rangeText || ''}`
+  }
+}
+
+// ---------- 服务器预设 ----------
+function renderPresets (list) {
+  presets = list || []
+  const prev = els.preset.value
+  els.preset.textContent = ''
+  const none = document.createElement('option')
+  none.value = ''
+  none.textContent = presets.length ? '（选择一个预设）' : '（还没有预设，填好地址后点保存）'
+  els.preset.appendChild(none)
+  for (const p of presets) {
+    const o = document.createElement('option')
+    o.value = p.name
+    o.textContent = `${p.name} — ${p.host}:${p.port} ${p.version === 'auto' ? '(自动版本)' : p.version}`
+    els.preset.appendChild(o)
+  }
+  if (presets.some((p) => p.name === prev)) els.preset.value = prev
+}
+
+function applyPreset (name) {
+  const p = presets.find((x) => x.name === name)
+  if (!p) return
+  els.host.value = p.host
+  els.port.value = p.port
+  els.auth.value = p.auth || 'offline'
+  els.version.value = p.version || 'auto'
+  els.presetName.value = p.name
+}
+
+// ---------- 正版登录状态 ----------
+function renderMicrosoft (st) {
+  if (!st || !els.msaStatus) return
+  if (st.cached) {
+    els.msaStatus.textContent = `正版登录：已缓存 ${(st.accounts || []).length} 个账号`
+    els.msaStatus.className = 'ai-status ok'
+  } else {
+    els.msaStatus.textContent = '正版未登录：登录方式选「正版微软账号」上线后，按日志里的设备码登录一次即可缓存'
+    els.msaStatus.className = 'ai-status'
+  }
+}
+
 // ---------- 事件绑定 ----------
+els.btnQuick.addEventListener('click', async () => {
+  const cfg = batchCfg()
+  if (!cfg.host) { alert('请先填写服务器地址'); return }
+  const r = await api.quickStart(cfg)
+  if (r && r.error) alert('一键上线失败：' + r.error)
+})
 els.btnBatch.addEventListener('click', () => { api.batchAdd(batchCfg()) })
-els.btnBatchStart.addEventListener('click', async () => {
-  const r = await api.batchAdd(batchCfg())
-  for (const id of (r && r.ids) || []) await api.startBot(id)
+els.preset.addEventListener('change', () => { if (els.preset.value) applyPreset(els.preset.value) })
+els.btnPresetSave.addEventListener('click', async () => {
+  const host = els.host.value.trim()
+  if (!host) { alert('请先填写服务器地址'); return }
+  const name = els.presetName.value.trim() || `${host}:${els.port.value}`
+  await api.savePreset({
+    name,
+    host,
+    port: Number(els.port.value) || 25565,
+    version: els.version.value || 'auto',
+    auth: els.auth.value
+  })
+})
+els.btnPresetLoad.addEventListener('click', () => {
+  const name = els.preset.value || els.presetName.value.trim()
+  if (name) applyPreset(name)
+})
+els.btnPresetDel.addEventListener('click', async () => {
+  const name = els.preset.value
+  if (name && confirm(`删除预设「${name}」？`)) await api.removePreset(name)
 })
 els.btnStartAll.addEventListener('click', () => api.startAll())
 els.btnStopAll.addEventListener('click', () => api.stopAll())
@@ -304,13 +424,26 @@ els.tgWander.addEventListener('change', () => { if (!suppressToggle && targetId)
 api.onLog(({ botName, line }) => appendLog(line, botName))
 api.onBots((list) => renderBots(list))
 api.onAi((s) => renderAi(s))
+api.onPresets((list) => renderPresets(list))
 api.onMsaCode(({ botName, code }) => {
   appendLog(`[warn] 正版登录：打开 ${code.verification_uri || 'https://microsoft.com/link'} 输入代码 ${code.user_code}`, botName)
 })
 
 // 初始化
 api.getState().then((s) => {
+  if (s && s.versions) renderVersions(s.versions)
+  if (s && s.presets) renderPresets(s.presets)
+  if (s && s.microsoft) renderMicrosoft(s.microsoft)
   if (s && s.ai) renderAi(s.ai)
+  if (s && s.lastUsed) {
+    const u = s.lastUsed
+    if (u.host) els.host.value = u.host
+    if (u.port) els.port.value = u.port
+    if (u.version) els.version.value = u.version
+    if (u.auth) els.auth.value = u.auth
+    if (u.namePrefix) els.namePrefix.value = u.namePrefix
+    if (u.presetName) els.preset.value = u.presetName
+  }
   if (s && s.bots) renderBots(s.bots)
-  appendLog('[系统] 界面已就绪：先填服务器信息批量添加假人，再在列表里点「上线」或直接「一键全部上线」')
+  appendLog('[系统] 就绪：填好服务器地址后点「⚡ 一键上线」即可；版本留「自动探测」不用管')
 })

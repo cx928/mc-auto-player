@@ -13,6 +13,10 @@ contextBridge.exposeInMainWorld('api', {
   // 假人管理
   addBot: (cfg) => ipcRenderer.invoke('addBot', cfg),
   batchAdd: (cfg) => ipcRenderer.invoke('batchAdd', cfg),
+  quickStart: (cfg) => ipcRenderer.invoke('quickStart', cfg),
+  savePreset: (p) => ipcRenderer.invoke('savePreset', p),
+  removePreset: (name) => ipcRenderer.invoke('removePreset', name),
+  microsoftStatus: () => ipcRenderer.invoke('microsoftStatus'),
   removeBot: (id) => ipcRenderer.invoke('removeBot', id),
   clearBots: () => ipcRenderer.invoke('clearBots'),
   startBot: (id) => ipcRenderer.invoke('startBot', id),
@@ -28,5 +32,6 @@ contextBridge.exposeInMainWorld('api', {
   onLog: (cb) => ipcRenderer.on('log', (_e, payload) => cb(payload)),
   onBots: (cb) => ipcRenderer.on('bots', (_e, list) => cb(list)),
   onMsaCode: (cb) => ipcRenderer.on('msa-code', (_e, payload) => cb(payload)),
-  onAi: (cb) => ipcRenderer.on('ai', (_e, s) => cb(s))
+  onAi: (cb) => ipcRenderer.on('ai', (_e, s) => cb(s)),
+  onPresets: (cb) => ipcRenderer.on('presets', (_e, list) => cb(list))
 })
