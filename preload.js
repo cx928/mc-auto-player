@@ -29,7 +29,10 @@ contextBridge.exposeInMainWorld('api', {
   action: (id, name, args) => ipcRenderer.invoke('action', id, name, args),
 
   // 事件订阅
-  onLog: (cb) => ipcRenderer.on('log', (_e, payload) => cb(payload)),
+  onLog: (cb) => {
+    ipcRenderer.on('log', (_e, payload) => cb(payload))
+    ipcRenderer.on('logBatch', (_e, batch) => cb(batch))
+  },
   onBots: (cb) => ipcRenderer.on('bots', (_e, list) => cb(list)),
   onMsaCode: (cb) => ipcRenderer.on('msa-code', (_e, payload) => cb(payload)),
   onAi: (cb) => ipcRenderer.on('ai', (_e, s) => cb(s)),

@@ -34,6 +34,12 @@ class AutoPlayer extends EventEmitter {
     this._armorTimer = null
     this._wanderTimer = null
     this._statusTimer = null
+    // 空闲省电相关
+    this.idleThrottle = true
+    this._idleTimer = null
+    this._throttled = false
+    this._idleSince = 0
+    this._throttleLogged = false
   }
 
   log (level, msg) {
@@ -62,7 +68,8 @@ class AutoPlayer extends EventEmitter {
       username: cfg.username || cfg.name || 'AutoPlayer',
       version: wantVersion,
       auth,
-      viewDistance: 'short',
+      // 视距直接决定每个假人加载多少区块：多假人挂机时调小能显著省内存和 CPU
+      viewDistance: cfg.viewDistance || 'short',
       checkTimeoutInterval: 30 * 1000,
       hideErrors: true, // 自己记录更清晰的错误信息，避免库里再打印一遍堆栈
       plugins: { pathfinder, tool: toolPlugin, collectBlock: collectPlugin },
@@ -74,6 +81,11 @@ class AutoPlayer extends EventEmitter {
     if (auth === 'microsoft') opts.authCache = cfg.authCache || 'msa-cache.json'
 
     this.versionMode = wantVersion === false ? '自动探测' : wantVersion
+    // 空闲省电（默认开）：cfg.idleThrottle === false 可关掉
+    this.idleThrottle = cfg.idleThrottle !== false
+    this._throttled = false
+    this._idleSince = 0
+    this._throttleLogged = false
     // 记住本次参数，便于"版本超范围时自动回退重试"
     if (!cfg._fromRetry) this._retried = false
     this._lastCfg = { ...cfg }
@@ -113,6 +125,7 @@ class AutoPlayer extends EventEmitter {
       // pathfinder 的事件由 bot 发出（pathfinder 2.x），不是 bot.pathfinder
       bot.on('goal_reached', () => this.log('info', '已到达目标点'))
       this._startStatusTimer()
+      this._startIdleWatch()
     })
 
     bot.on('kicked', (reason) => {
@@ -164,8 +177,10 @@ class AutoPlayer extends EventEmitter {
   }
 
   _cleanup () {
-    clearInterval(this._armorTimer); clearInterval(this._wanderTimer); clearInterval(this._statusTimer)
-    this._armorTimer = this._wanderTimer = this._statusTimer = null
+    clearInterval(this._armorTimer); clearInterval(this._wanderTimer); clearInterval(this._statusTimer); clearInterval(this._idleTimer)
+    this._armorTimer = this._wanderTimer = this._statusTimer = this._idleTimer = null
+    this._throttled = false
+    this._idleSince = 0
     this.autoEatOn = this.autoArmorOn = this.wanderOn = false
     this.eating = false
     this.collecting = false
@@ -223,12 +238,14 @@ class AutoPlayer extends EventEmitter {
 
   walkTo (x, y, z, range = 2) {
     if (!this._ready()) return
+    this._wake()
     this.bot.pathfinder.setGoal(new GoalNear(x, y, z, range))
     this.log('info', `开始前往 (${x}, ${y}, ${z})`)
   }
 
   follow (name) {
     if (!this._ready()) return
+    this._wake()
     const target = this.bot.players ? this.bot.players[name] : null
     if (!target || !target.entity) { this.log('warn', `找不到玩家 ${name}`); return }
     this.followName = name
@@ -246,6 +263,7 @@ class AutoPlayer extends EventEmitter {
   // ---------- 采集 / 挖掘 ----------
   async collect (name, count = 1, range = 64) {
     if (!this._ready()) return
+    this._wake()
     const id = this.mcData.blocksByName[name] ? this.mcData.blocksByName[name].id : null
     if (!id) { this.log('error', `未知方块: ${name}（请使用英文 ID，如 iron_ore）`); return }
     if (this.collecting) { this.log('warn', '已有收集任务进行中'); return }
@@ -271,6 +289,7 @@ class AutoPlayer extends EventEmitter {
 
   async dig (x, y, z) {
     if (!this._ready()) return
+    this._wake()
     const block = this.bot.blockAt(new Vec3(x, y, z))
     if (!block || block.name === 'air') { this.log('warn', `(${x}, ${y}, ${z}) 处没有可挖的方块`); return }
     try {
@@ -296,6 +315,7 @@ class AutoPlayer extends EventEmitter {
   // 攻击附近的怪物（AI 自主游玩/自卫用）
   async attackNearest (range = 4) {
     if (!this._ready() || !this.bot.entity) return
+    this._wake()
     const pos = this.bot.entity.position
     const target = this.bot.nearestEntity((e) => {
       if (!e || !e.position || e === this.bot.entity) return false
@@ -311,6 +331,58 @@ class AutoPlayer extends EventEmitter {
       this.log('info', `攻击 ${label}`)
     } catch (e) {
       this.log('warn', `攻击 ${label} 失败: ${e.message}`)
+    }
+  }
+
+  // ---------- 空闲省电：无动作时暂停本地物理模拟 ----------
+  // 依据：mineflayer 每 50ms 为每个假人跑一次 simulatePlayer，实测占多假人场景一半以上的 CPU。
+  // 安全性：关闭 physicsEnabled 只停掉「本地物理模拟」；服务端位置包（position）是无条件应用的，
+  //        发往服务端的位置上报（updatePosition）也照常执行，所以站着不动的假人不会失同步。
+  //        任何动作（寻路/跟随/采集/挖/攻击/巡逻）前都会立刻恢复物理模拟。
+  _startIdleWatch () {
+    if (this._idleTimer || !this.idleThrottle) return
+    this._idleTimer = setInterval(() => this._idleTick(), 500)
+  }
+
+  _isIdle () {
+    const b = this.bot
+    if (!this.idleThrottle || !b || !b.entity) return false
+    if (this.collecting || this.eating || this.wanderOn) return false
+    if (b.vehicle) return false
+    if (b.pathfinder && (b.pathfinder.goal || (b.pathfinder.isMoving && b.pathfinder.isMoving()))) return false
+    const e = b.entity
+    if (!e.onGround) return false
+    const v = e.velocity
+    if (v && (Math.abs(v.x) > 0.02 || Math.abs(v.z) > 0.02)) return false
+    return true
+  }
+
+  _idleTick () {
+    const b = this.bot
+    if (!b || !b.entity) return
+    if (this._isIdle()) {
+      if (!this._idleSince) this._idleSince = Date.now()
+      // 回滞 1.2 秒，避免走走停停时反复切换
+      if (!this._throttled && Date.now() - this._idleSince > 1200) {
+        b.physicsEnabled = false
+        this._throttled = true
+        if (!this._throttleLogged) {
+          this._throttleLogged = true
+          this.log('info', '空闲省电：已暂停本地物理模拟（有任何动作会自动恢复）')
+        }
+      }
+    } else {
+      this._idleSince = 0
+      this._wake()
+    }
+  }
+
+  // 任何动作前调用：确保物理模拟是开着的
+  _wake () {
+    this._idleSince = 0
+    if (this._throttled && this.bot) {
+      this.bot.physicsEnabled = true
+      this._throttled = false
     }
   }
 
@@ -334,6 +406,7 @@ class AutoPlayer extends EventEmitter {
 
   setWander (on) {
     this.wanderOn = !!on
+    if (on) this._wake()
     this.log('info', on ? '自动巡逻已开启' : '自动巡逻已关闭')
     clearInterval(this._wanderTimer)
     this._wanderTimer = null

@@ -39,7 +39,22 @@ function broadcast (type, payload) {
   }
 }
 
-manager.on('log', (e) => broadcast('log', e))
+// 日志批量推送：把短时间内的多条日志合并成一条 SSE 消息。
+// 多假人 + 热闹的服务器时日志可达上百条/秒，逐条推送会让浏览器做上百次渲染。
+let logBuf = []
+let logTimer = null
+function flushLogs () {
+  if (logTimer) { clearTimeout(logTimer); logTimer = null }
+  if (!logBuf.length) return
+  const batch = logBuf
+  logBuf = []
+  broadcast('logBatch', batch)
+}
+manager.on('log', (e) => {
+  logBuf.push(e)
+  if (logBuf.length >= 50) return flushLogs()
+  if (!logTimer) logTimer = setTimeout(flushLogs, 150)
+})
 manager.on('bots', (list) => broadcast('bots', list))
 manager.on('msa-code', (e) => broadcast('msa-code', e))
 manager.on('ai', (s) => broadcast('ai', s))

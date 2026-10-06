@@ -79,10 +79,21 @@ function registerIpc () {
 app.whenReady().then(() => {
   manager = new BotManager({ settingsFile: path.join(app.getPath('userData'), 'settings.json') })
 
+  // 日志批量推送：多假人时日志可达上百条/秒，逐条 IPC 会让界面做上百次渲染
+  let logBuf = []
+  let logTimer = null
+  const flushLogs = () => {
+    if (logTimer) { clearTimeout(logTimer); logTimer = null }
+    if (!logBuf.length) return
+    const batch = logBuf
+    logBuf = []
+    send('logBatch', batch)
+  }
   manager.on('log', (e) => {
-    const line = `[${e.botName}] ${e.line}`
-    try { fs.appendFileSync(ensureLogFile(), line + '\n') } catch (_) {}
-    send('log', { botId: e.botId, botName: e.botName, line: e.line })
+    try { fs.appendFileSync(ensureLogFile(), `[${e.botName}] ${e.line}\n`) } catch (_) {}
+    logBuf.push({ botId: e.botId, botName: e.botName, line: e.line })
+    if (logBuf.length >= 50) return flushLogs()
+    if (!logTimer) logTimer = setTimeout(flushLogs, 150)
   })
   manager.on('bots', (list) => send('bots', list))
   manager.on('msa-code', (e) => send('msa-code', e))

@@ -38,7 +38,15 @@ class BotManager extends EventEmitter {
     this.autoStart = false
     this._statusTimer = null
     this.load()
-    this._statusTimer = setInterval(() => this.emit('bots', this.getBots()), 1000)
+    // 状态定时器：内容没变化就不广播（空闲假人的坐标/血量不变，可完全省掉 IPC/SSE 与界面重绘）
+    this._lastBotsSig = ''
+    this._statusTimer = setInterval(() => {
+      const list = this.getBots()
+      const sig = JSON.stringify(list)
+      if (sig === this._lastBotsSig) return
+      this._lastBotsSig = sig
+      this.emit('bots', list)
+    }, 1000)
   }
 
   // ---------- 持久化 ----------
@@ -119,6 +127,8 @@ class BotManager extends EventEmitter {
       port: hp.port,
       version: cfg.version && cfg.version !== '' ? cfg.version : 'auto', // auto = 让 mineflayer 自己探测服务器版本
       auth: cfg.auth === 'microsoft' ? 'microsoft' : 'offline',
+      viewDistance: cfg.viewDistance || 'short', // far / normal / short / tiny
+      idleThrottle: cfg.idleThrottle !== false,  // 空闲时暂停本地物理模拟（省 CPU）
       aiMode: ['passive', 'autonomous'].includes(cfg.aiMode) ? cfg.aiMode : 'off'
     }
     const player = new AutoPlayer()
@@ -138,13 +148,13 @@ class BotManager extends EventEmitter {
       agent.onChat(username, message)
     })
     agent.on('log', (level, line) => this.emit('log', { botId: id, botName: config.name, line: `[${level}] ${line}` }))
-    agent.on('auto-off', () => { entry.aiMode = 'off'; this.save(); this.emit('bots', this.getBots()) })
+    agent.on('auto-off', () => { entry.aiMode = 'off'; this.save(); this._emitBots() })
 
     if (!opts.silent) {
       this.save()
       this.emit('log', { botId: id, botName: config.name, line: `[info] 已添加假人 ${config.name}（${config.host}:${config.port}）` })
     }
-    this.emit('bots', this.getBots())
+    this._emitBots()
     return id
   }
 
@@ -240,7 +250,7 @@ class BotManager extends EventEmitter {
     const ids = this.batchAdd(merged)
     for (const id of ids) this.startBot(id)
     this.save()
-    this.emit('bots', this.getBots())
+    this._emitBots()
     this.emit('log', {
       botId: null,
       botName: '系统',
@@ -275,7 +285,7 @@ class BotManager extends EventEmitter {
     b.player.removeAllListeners()
     this.bots.delete(id)
     this.save()
-    this.emit('bots', this.getBots())
+    this._emitBots()
     return true
   }
 
@@ -328,7 +338,7 @@ class BotManager extends EventEmitter {
     b.config.aiMode = b.aiMode
     b.agent.setMode(b.aiMode)
     this.save()
-    this.emit('bots', this.getBots())
+    this._emitBots()
     return true
   }
 
@@ -353,6 +363,14 @@ class BotManager extends EventEmitter {
       default: return false
     }
     return true
+  }
+
+  // 立即广播一次状态（事件驱动时用；同时更新签名，避免定时器重复广播一次）
+  _emitBots () {
+    const list = this.getBots()
+    this._lastBotsSig = JSON.stringify(list)
+    this.emit('bots', list)
+    return list
   }
 
   getBots () {

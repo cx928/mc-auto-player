@@ -16,6 +16,7 @@ function createWebApi () {
     } catch (_) { /* 忽略心跳 */ }
   }
   const on = (type) => (cb) => listeners[type].push(cb)
+  const onAny = (types) => (cb) => types.forEach((t) => listeners[t].push(cb))
   const post = (name, body) => fetch('/api/' + name, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -39,7 +40,7 @@ function createWebApi () {
     saveAi: (cfg) => post('saveAi', cfg),
     testAi: () => post('testAi', {}),
     action: (id, name, args) => post('action', { id, name, args }),
-    onLog: on('log'),
+    onLog: onAny(['log', 'logBatch']),
     onBots: on('bots'),
     onMsaCode: on('msa-code'),
     onAi: on('ai'),
@@ -79,114 +80,171 @@ let versions = null
 let targetId = null
 let suppressToggle = false // 状态刷新时避免把 checkbox 的 change 当成用户操作
 
-// ---------- 日志 ----------
+// ---------- 日志（批量写入：原来每行日志都 appendChild + 读 scrollHeight，等于每行强制一次布局） ----------
 const LEVELS = { error: 'l-error', warn: 'l-warn', info: 'l-info', chat: 'l-chat', server: 'l-server', debug: 'l-server' }
+const LOG_MAX = 1500
+let logQueue = []
+let logTimer = null
 
 function appendLog (line, botName) {
-  const m = /\[(\w+)\]/.exec(line)
-  const cls = m && LEVELS[m[1]] ? LEVELS[m[1]] : ''
-  const div = document.createElement('div')
-  if (cls) div.className = cls
-  div.textContent = botName ? `[${botName}] ${line}` : line
-  els.log.appendChild(div)
-  while (els.log.childNodes.length > 1500) els.log.removeChild(els.log.firstChild)
-  els.log.scrollTop = els.log.scrollHeight
+  logQueue.push({ line, botName })
+  if (!logTimer) logTimer = setTimeout(flushLogs, 80)
 }
 
-// ---------- 假人列表 ----------
-function botRow (b) {
-  const row = document.createElement('div')
-  row.className = 'bot-row' + (b.connected ? ' on' : '')
+function flushLogs () {
+  logTimer = null
+  if (!logQueue.length) return
+  const frag = document.createDocumentFragment()
+  for (const item of logQueue) {
+    const m = /\[(\w+)\]/.exec(item.line)
+    const div = document.createElement('div')
+    const cls = m && LEVELS[m[1]] ? LEVELS[m[1]] : ''
+    if (cls) div.className = cls
+    div.textContent = item.botName ? `[${item.botName}] ${item.line}` : item.line
+    frag.appendChild(div)
+  }
+  logQueue = []
+  const box = els.log
+  box.appendChild(frag)
+  let over = box.childNodes.length - LOG_MAX
+  while (over-- > 0) box.removeChild(box.firstChild)
+  box.scrollTop = box.scrollHeight // 每次刷新只触发一次布局
+}
 
-  const dot = document.createElement('span')
-  dot.className = 'dot ' + (b.connected ? 'on' : 'off')
-  row.appendChild(dot)
+// ---------- 假人列表（增量更新：复用已有行，不再每秒整表重建） ----------
+const rowCache = new Map() // botId -> { row, dot, name, addr, stats, aiSel, btnStart, btnStop }
+let emptyMsg = null
+let lastTargetKey = ''
 
-  const name = document.createElement('span')
-  name.className = 'bot-name'
-  name.textContent = b.name
-  row.appendChild(name)
+const setText = (el, text) => { if (el.textContent !== text) el.textContent = text }
 
-  const addr = document.createElement('span')
-  addr.className = 'bot-addr'
+function addrText (b) {
   // 自动探测时显示实际连上的服务器版本
-  const verText = b.detectedVersion
+  const ver = b.detectedVersion
     ? `${b.detectedVersion}${b.version === 'auto' ? '(自动)' : ''}`
     : (b.version === 'auto' ? '自动探测' : b.version)
-  addr.textContent = `${b.host}:${b.port} · ${verText}`
-  if (b.detectedVersion && b.protocolVersion) addr.title = `协议 ${b.protocolVersion}`
-  row.appendChild(addr)
+  return `${b.host}:${b.port} · ${ver}`
+}
 
-  const stats = document.createElement('span')
-  stats.className = 'bot-stats'
-  stats.textContent = b.connected
+function statsText (b) {
+  return b.connected
     ? `❤ ${b.health}  🍗 ${b.food}  📍 ${b.pos ? `${b.pos.x},${b.pos.y},${b.pos.z}` : '-'}  👥 ${b.players}  AI调用 ${b.aiCalls}`
     : '未连接'
-  row.appendChild(stats)
+}
 
+// 只创建一次 DOM 与事件监听
+function createBotRow (bot) {
+  const row = document.createElement('div')
+  const dot = document.createElement('span')
+  const name = document.createElement('span')
+  name.className = 'bot-name'
+  const addr = document.createElement('span')
+  addr.className = 'bot-addr'
+  const stats = document.createElement('span')
+  stats.className = 'bot-stats'
   const aiSel = document.createElement('select')
   aiSel.className = 'mini'
   for (const [val, label] of [['off', 'AI 关'], ['passive', 'AI 被动'], ['autonomous', 'AI 自主']]) {
     const o = document.createElement('option')
     o.value = val
     o.textContent = label
-    if (b.aiMode === val) o.selected = true
     aiSel.appendChild(o)
   }
-  aiSel.addEventListener('change', () => api.setAiMode(b.id, aiSel.value))
-  row.appendChild(aiSel)
-
   const btnStart = document.createElement('button')
   btnStart.className = 'btn small'
   btnStart.textContent = '上线'
-  btnStart.disabled = b.connected
-  btnStart.addEventListener('click', () => api.startBot(b.id))
-  row.appendChild(btnStart)
-
   const btnStop = document.createElement('button')
   btnStop.className = 'btn small'
   btnStop.textContent = '下线'
-  btnStop.disabled = !b.connected
-  btnStop.addEventListener('click', () => api.stopBot(b.id))
-  row.appendChild(btnStop)
-
   const btnDel = document.createElement('button')
   btnDel.className = 'btn small danger'
   btnDel.textContent = '移除'
-  btnDel.addEventListener('click', () => api.removeBot(b.id))
-  row.appendChild(btnDel)
+  row.append(dot, name, addr, stats, aiSel, btnStart, btnStop, btnDel)
 
-  return row
+  // 闭包里用固定的 id，避免每次重绘都重新绑监听
+  const id = bot.id
+  aiSel.addEventListener('change', () => api.setAiMode(id, aiSel.value))
+  btnStart.addEventListener('click', () => api.startBot(id))
+  btnStop.addEventListener('click', () => api.stopBot(id))
+  btnDel.addEventListener('click', () => api.removeBot(id))
+
+  return { row, dot, name, addr, stats, aiSel, btnStart, btnStop, btnDel }
+}
+
+function updateBotRow (e, b) {
+  const on = !!b.connected
+  const rowCls = 'bot-row' + (on ? ' on' : '')
+  if (e.row.className !== rowCls) e.row.className = rowCls
+  const dotCls = 'dot ' + (on ? 'on' : 'off')
+  if (e.dot.className !== dotCls) e.dot.className = dotCls
+  setText(e.name, b.name)
+  setText(e.addr, addrText(b))
+  setText(e.stats, statsText(b))
+  const title = b.protocolVersion ? `协议 ${b.protocolVersion}` : ''
+  if (e.addr.title !== title) e.addr.title = title
+  if (e.aiSel.value !== b.aiMode) e.aiSel.value = b.aiMode
+  if (e.btnStart.disabled !== on) e.btnStart.disabled = on
+  if (e.btnStop.disabled !== !on) e.btnStop.disabled = !on
+}
+
+function ensureEmptyMsg () {
+  if (!emptyMsg) {
+    emptyMsg = document.createElement('p')
+    emptyMsg.className = 'empty'
+    emptyMsg.textContent = '还没有假人，上面添加一个吧'
+    els.botList.appendChild(emptyMsg)
+  }
+  return emptyMsg
 }
 
 function renderBots (list) {
   bots = list || []
-  els.botCount.textContent = bots.length
-  els.botList.textContent = ''
-  if (!bots.length) {
-    const p = document.createElement('p')
-    p.className = 'empty'
-    p.textContent = '还没有假人，上面添加一个吧'
-    els.botList.appendChild(p)
-  } else {
-    for (const b of bots) els.botList.appendChild(botRow(b))
-  }
+  setText(els.botCount, String(bots.length))
 
-  // 目标假人下拉
-  const prev = targetId || els.targetBot.value
-  els.targetBot.textContent = ''
+  const seen = new Set()
   for (const b of bots) {
-    const o = document.createElement('option')
-    o.value = b.id
-    o.textContent = `${b.name}${b.connected ? '（在线）' : '（离线）'}`
-    els.targetBot.appendChild(o)
+    seen.add(b.id)
+    let e = rowCache.get(b.id)
+    if (!e) {
+      e = createBotRow(b)
+      rowCache.set(b.id, e)
+      els.botList.appendChild(e.row)
+    }
+    updateBotRow(e, b)
   }
-  if (bots.some((b) => b.id === prev)) els.targetBot.value = prev
-  targetId = els.targetBot.value || (bots[0] ? bots[0].id : null)
+  for (const [id, e] of [...rowCache.entries()]) {
+    if (seen.has(id)) continue
+    if (e.row.parentNode) e.row.parentNode.removeChild(e.row)
+    rowCache.delete(id)
+  }
+  ensureEmptyMsg().style.display = bots.length ? 'none' : ''
+
+  // 目标下拉：只有 id 列表变化时才重建（否则每秒重建立刻打断用户正在做的选择）
+  const key = bots.map((b) => b.id).join(',')
+  if (key !== lastTargetKey) {
+    lastTargetKey = key
+    const prev = targetId || els.targetBot.value
+    els.targetBot.textContent = ''
+    for (const b of bots) {
+      const o = document.createElement('option')
+      o.value = b.id
+      o.textContent = `${b.name}${b.connected ? '（在线）' : '（离线）'}`
+      els.targetBot.appendChild(o)
+    }
+    if (bots.some((b) => b.id === prev)) els.targetBot.value = prev
+    targetId = els.targetBot.value || (bots[0] ? bots[0].id : null)
+  } else {
+    const opts = els.targetBot.options
+    for (let i = 0; i < opts.length && i < bots.length; i++) {
+      const b = bots[i]
+      setText(opts[i], `${b.name}${b.connected ? '（在线）' : '（离线）'}`)
+    }
+  }
 
   const online = bots.filter((b) => b.connected).length
-  els.stateDot.className = 'dot ' + (online ? 'on' : 'off')
-  els.stateText.textContent = online ? `${online}/${bots.length} 在线` : '未连接'
+  const dotCls = 'dot ' + (online ? 'on' : 'off')
+  if (els.stateDot.className !== dotCls) els.stateDot.className = dotCls
+  setText(els.stateText, online ? `${online}/${bots.length} 在线` : '未连接')
 
   updateTargetControls()
 }
@@ -420,8 +478,11 @@ els.tgEat.addEventListener('change', () => { if (!suppressToggle && targetId) ap
 els.tgArmor.addEventListener('change', () => { if (!suppressToggle && targetId) api.action(targetId, 'autoarmor', { on: els.tgArmor.checked }) })
 els.tgWander.addEventListener('change', () => { if (!suppressToggle && targetId) api.action(targetId, 'wander', { on: els.tgWander.checked }) })
 
-// 事件订阅
-api.onLog(({ botName, line }) => appendLog(line, botName))
+// 事件订阅（日志可能是单条，也可能是批量数组）
+api.onLog((payload) => {
+  if (Array.isArray(payload)) payload.forEach((p) => appendLog(p.line, p.botName))
+  else appendLog(payload.line, payload.botName)
+})
 api.onBots((list) => renderBots(list))
 api.onAi((s) => renderAi(s))
 api.onPresets((list) => renderPresets(list))
