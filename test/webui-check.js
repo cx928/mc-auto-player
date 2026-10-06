@@ -77,6 +77,29 @@ async function main () {
   const pathTraversal = await get('/../package.json')
   check('拒绝路径穿越请求', pathTraversal.code === 400 || pathTraversal.code === 404, `状态=${pathTraversal.code}`)
 
+  // ---------- PWA（可安装到手机主屏幕，供安卓/iOS 遥控用） ----------
+  const man = await get('/manifest.webmanifest')
+  let manJson = {}
+  try { manJson = JSON.parse(man.body) } catch (_) {}
+  check('PWA manifest 可访问且是合法 JSON',
+    man.code === 200 && !!manJson.name && Array.isArray(manJson.icons) && manJson.display === 'standalone',
+    `${man.code} name=${manJson.name || '?'} 图标=${(manJson.icons || []).length}个`)
+
+  const swRes = await get('/sw.js')
+  check('Service Worker 可访问', swRes.code === 200 && swRes.body.includes("addEventListener('fetch'"), `状态=${swRes.code}`)
+
+  const icon = await get('/icon-192.png')
+  check('应用图标是真实 PNG', icon.code === 200 && icon.body.slice(1, 4) === 'PNG',
+    `状态=${icon.code}`)
+
+  const apple = await get('/apple-touch-icon.png')
+  const fav = await get('/favicon.ico')
+  check('iOS 主屏图标与 favicon 可访问', apple.code === 200 && fav.code === 200, `apple=${apple.code} favicon=${fav.code}`)
+
+  check('页面声明了 manifest / viewport / iOS 全屏',
+    page.body.includes('rel="manifest"') && page.body.includes('name="viewport"') &&
+    page.body.includes('apple-mobile-web-app-capable'))
+
   const st = await get('/api/state')
   let stJson = {}
   try { stJson = JSON.parse(st.body) } catch (e) {}

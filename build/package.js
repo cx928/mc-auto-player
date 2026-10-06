@@ -195,9 +195,11 @@ const APP_FILES = {
   cli: ['cli.js', 'bot', 'package.json'],
   webui: ['cli.js', 'bot', 'web', 'renderer', 'package.json']
 }
+// 各平台的一键脚本也一起带上（macOS / Termux）
+const APP_EXTRA_DIRS = ['scripts']
 
 // 随包分发的文档
-const PACK_DOCS = ['CHANGELOG.md', '版本介绍.md']
+const PACK_DOCS = ['CHANGELOG.md', '版本介绍.md', '使用方案.md']
 
 function copyPackDocs (dest) {
   for (const doc of PACK_DOCS) {
@@ -300,8 +302,9 @@ function assemble (variant, platform, linuxNodePath) {
   rmrf(stage)
   fs.mkdirSync(path.join(stage, 'app'), { recursive: true })
 
-  for (const f of APP_FILES[variant]) {
+  for (const f of APP_FILES[variant].concat(APP_EXTRA_DIRS)) {
     const src = path.join(PROJ, f)
+    if (!fs.existsSync(src)) continue
     const dst = path.join(stage, 'app', f)
     fs.mkdirSync(path.dirname(dst), { recursive: true })
     fs.cpSync(src, dst, { recursive: true })

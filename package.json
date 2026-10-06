@@ -1,8 +1,8 @@
 {
   "name": "mc-auto-player",
   "productName": "MC自动玩家",
-  "version": "0.1.1",
-  "description": "Minecraft Java 版自动玩家：多假人 + AI 对话/操控（Mineflayer 核心，命令行/WebUI/Electron 三种形态）",
+  "version": "0.2.0",
+  "description": "Minecraft Java 版自动玩家：多假人 + AI 对话/操控，支持 1.12~26.1 版本自动探测（命令行/WebUI/Electron 三种形态）",
   "main": "main.js",
   "license": "MIT",
   "scripts": {

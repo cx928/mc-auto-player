@@ -175,3 +175,47 @@ select.wide { width: 260px; }
 .btn.big { padding: 10px 24px; font-size: 15px; font-weight: bold; }
 input.short { width: 170px; }
 
+/* ---------- 移动端适配（手机浏览器 / PWA 安装后） ---------- */
+@media (max-width: 780px) {
+  header {
+    padding: 10px 12px;
+    padding-top: calc(10px + env(safe-area-inset-top));
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .sub { display: none; }
+  main {
+    padding: 10px 12px calc(18px + env(safe-area-inset-bottom));
+    gap: 10px;
+  }
+  .panel { padding: 10px 12px; }
+  .grid { grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 8px; }
+  .bot-row { gap: 6px; padding: 6px 8px; }
+  .bot-row .bot-addr { font-size: 11px; }
+  .bot-row .bot-stats { min-width: 100%; order: 9; }
+  .action-row .lbl { width: 52px; }
+  .action-row input { width: 88px; }
+  #chat-input { min-width: 120px; }
+  .btn { padding: 8px 13px; }
+  .btn.big { width: 100%; }
+  select.wide { width: 100%; }
+  .row { flex-wrap: wrap; }
+  .log { max-height: 200px; font-size: 11px; }
+  .toggles { flex-wrap: wrap; gap: 12px; }
+}
+
+@media (max-width: 430px) {
+  h1 { font-size: 16px; }
+  .grid { grid-template-columns: 1fr 1fr; }
+  .bot-row select.mini { width: 100%; }
+  input.short { width: 100%; }
+}
+
+/* 横屏 iPhone 的左右安全区 */
+@supports (padding: env(safe-area-inset-left)) {
+  main {
+    padding-left: max(12px, env(safe-area-inset-left));
+    padding-right: max(12px, env(safe-area-inset-right));
+  }
+}
+

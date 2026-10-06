@@ -51,9 +51,12 @@ async function checkCli () {
   const count = Number(process.env.PKG_COUNT || 1)
   // PKG_HOST_WITH_PORT=1 时把端口写在 --host 里（用户最容易踩的写法），验证自动拆分
   const withPortInHost = process.env.PKG_HOST_WITH_PORT === '1'
+  // PKG_AUTO_VERSION=1 时不传 --version，验证打包版默认的"版本自动探测"
+  const autoVersion = process.env.PKG_AUTO_VERSION === '1'
   console.log(`启动打包后的可执行文件: ${exe}` + (count > 1 ? `（多假人模式，${count} 个）` : ''))
-  const cliArgs = ['--host', withPortInHost ? `${MC_HOST}:${MC_PORT}` : MC_HOST, '--user', 'PkgBot', '--version', '1.21.11']
+  const cliArgs = ['--host', withPortInHost ? `${MC_HOST}:${MC_PORT}` : MC_HOST, '--user', 'PkgBot']
   if (!withPortInHost) cliArgs.push('--port', MC_PORT)
+  if (!autoVersion) cliArgs.push('--version', '1.21.11')
   if (count > 1) cliArgs.push('--count', String(count))
   const child = spawn(exe, cliArgs, {
     stdio: ['pipe', 'pipe', 'pipe']
@@ -71,6 +74,11 @@ async function checkCli () {
   }
   check('能连接 1.21.11 服务器', out.includes('登录成功'))
   check('能生成到世界', out.includes('已生成到世界中'))
+  if (autoVersion) {
+    check('版本自动探测生效（未手填版本也能识别）', /服务器版本: 1\.21\.11（官方测试过）/.test(out),
+      (out.match(/服务器版本:[^\n]*/) || [''])[0].trim())
+    check('横幅标注版本为自动探测', out.includes('版本: 自动探测'))
+  }
 
   if (count > 1) {
     child.stdin.write('/bots\n')

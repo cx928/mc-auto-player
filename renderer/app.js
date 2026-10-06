@@ -429,6 +429,15 @@ api.onMsaCode(({ botName, code }) => {
   appendLog(`[warn] 正版登录：打开 ${code.verification_uri || 'https://microsoft.com/link'} 输入代码 ${code.user_code}`, botName)
 })
 
+// WebUI 模式下注册 Service Worker（可安装到手机主屏幕）；Electron 模式走 file:// 不需要
+if (!window.api && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {
+      /* http 局域网访问不是安全上下文，注册会失败，属正常现象 */
+    })
+  })
+}
+
 // 初始化
 api.getState().then((s) => {
   if (s && s.versions) renderVersions(s.versions)
